@@ -90,11 +90,11 @@ def build_daily_dataset(frame, args):
 
 def create_features(daily):
     features = pd.DataFrame(index=daily.index)
-    features["day_of_week"] = daily.index.dayofweek
+    features["day_of_week"] = daily.index.day_of_week
     features["month"] = daily.index.month
     features["day_of_month"] = daily.index.day
     features["week_of_year"] = daily.index.isocalendar().week.astype(int)
-    features["is_weekend"] = (daily.index.dayofweek >= 5).astype(int)
+    features["is_weekend"] = (daily.index.day_of_week >= 5).astype(int)
     y = daily.rib_quantity
     features["lag_1"] = y.shift(1)
     features["lag_7"] = y.shift(7)
@@ -119,8 +119,8 @@ def build_models():
 
 
 def baseline_predict(train, index):
-    averages = train.groupby(train.index.dayofweek).rib_quantity.mean()
-    return np.array([averages.get(day, train.rib_quantity.mean()) for day in index.dayofweek])
+    averages = train.groupby(train.index.day_of_week).rib_quantity.mean()
+    return np.array([averages.get(day, train.rib_quantity.mean()) for day in index.day_of_week])
 
 
 def evaluate_model(actual, prediction):
@@ -136,7 +136,7 @@ def save_plot(path):
 def plot_results(daily, predictions, output):
     daily.rib_quantity.plot(figsize=(10, 4), title="Daily rib sales", ylabel="Quantity")
     save_plot(output / "rib_sales_over_time.png")
-    for groups, name, title in [(daily.index.dayofweek, "weekday", "Average sales by weekday (0=Monday)"), (daily.index.month, "month", "Average sales by month")]:
+    for groups, name, title in [(daily.index.day_of_week, "weekday", "Average sales by weekday (0=Monday)"), (daily.index.month, "month", "Average sales by month")]:
         daily.rib_quantity.groupby(groups).mean().plot.bar(title=title, ylabel="Quantity")
         save_plot(output / f"sales_by_{name}.png")
     daily.rib_quantity.plot.hist(bins=20, title="Daily rib sales distribution", xlabel="Quantity")
@@ -238,4 +238,3 @@ if __name__ == "__main__":
         run(parse_args())
     except (ValueError, OSError) as exc:
         raise SystemExit(f"Error: {exc}") from exc
-

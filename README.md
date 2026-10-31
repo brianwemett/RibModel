@@ -70,3 +70,5 @@ Tests use synthetic sales and verify past-only features, missing-day handling an
 
 Intended repository: https://github.com/brianwemett/RibModel
 Do not commit restaurant exports, local environments, secrets or generated reports. Authentication is handled by your Git credential manager or SSH configuration.
+
+For the exact verified dependency versions, install with: `python -m pip install -r requirements-lock.txt`.

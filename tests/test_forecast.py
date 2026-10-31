@@ -39,7 +39,7 @@ class ForecastTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             index = pd.date_range("2025-01-01", periods=100)
-            quantities = np.random.default_rng(42).poisson(12 + 5 * (index.dayofweek >= 5))
+            quantities = np.random.default_rng(42).poisson(12 + 5 * (index.day_of_week >= 5))
             pd.DataFrame({"date": index, "item": "baby back ribs", "quantity": quantities}).to_csv(root / "sales.csv", index=False)
             run(options(root / "sales.csv", root / "outputs"))
             metrics = pd.read_csv(root / "outputs/model_comparison.csv")
