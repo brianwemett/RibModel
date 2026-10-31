@@ -72,3 +72,75 @@ Intended repository: https://github.com/brianwemett/RibModel
 Do not commit restaurant exports, local environments, secrets or generated reports. Authentication is handled by your Git credential manager or SSH configuration.
 
 For the exact verified dependency versions, install with: `python -m pip install -r requirements-lock.txt`.
+
+
+## Prepared daily exports (Good Smoke BBQ)
+
+The uploaded `data/rib_sales_daily.csv` is already normalized by business date and rack portion. Run from the project root:
+
+```powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
+```
+
+Daily format is detected by `total_quarter_racks`; use `--input-format daily` to specify it explicitly. The target is **quarter racks**, not menu item counts. Full rack = 4 quarters; half rack = 2. Do not multiply combo/modifier counts again: the prepared totals already contain those conversions. The mapping is used to audit conversion arithmetic and reconcile its full-period total against daily totals, not to recount sales. It must cover the same export period. Daily component totals and `total_racks_equiv` are checked when present. Raw transaction mode remains supported (`--input-format transactions`).
+
+The command above uses a fixed 12-quarter buffer (3 full racks). JSON output includes expected quarter racks, rack equivalents and the number of whole racks needed after buffering. The generic CLI default remains 3 input units, so explicitly set your chosen buffer. Use `--buffer-type percent --prep-buffer 15` for a 15% buffer.
+
+`partial=1` days are retained in the calendar audit but excluded from targets and historical quantities. A partial last day still determines the next calendar date; its incomplete total never becomes a next-day lag. The recommendation reports the latest complete observation and number of missing recent sales days, and is provisional when recent data is incomplete.
+
+By default, daily rows with zero checks are treated as probable closures and excluded from targets/history; `--closed-days keep` retains them as zeros for calendar-day sales forecasting. This inference needs operational confirmation. One-check/near-zero days remain included, including Easter; do not infer closure from low demand alone. Predictions under the default policy describe an assumed open service day. Check the opening schedule before prep.
+
+`outputs/data_quality.json` lists units, usable days, excluded dates and reconciled totals. `daily_rib_sales.csv` retains reported quantities and exclusion reasons. Worst-day tables include check counts, holiday names and event labels for retrospective investigation only; event labels may be unverified. Contextual columns, same-day net sales and manually supplied holiday fields are not core-model predictors. Weather can enter the optional scenario adjustment described below. No online event verification is performed.
+
+The November 2025-October 2026 upload has less than a complete annual cycle. Rib Teaser portion sizes and ad-hoc item assumptions remain as documented in the data README. No stockout history was supplied, so the forecast estimates observed sales rather than uncensored demand. The data README references upstream build/weather files that are not present in this folder; this project consumes the prepared CSVs directly. All uploaded data and generated results remain excluded from Git.
+
+
+## Weekly prep sheet
+
+Each forecast run also creates `outputs/weekly_prep_sheet.pdf` (one printable landscape letter page), `weekly_prep_sheet.csv` (editable daily figures), and a PNG preview. By default the sheet covers the next seven calendar days after the latest input date. It shows forecast volume, daily buffered prep, a weekly total, and blanks for actual prep, sold, leftovers and notes. For quarter-rack inputs, the kitchen sheet shows demand in full-rack equivalents and prep/actuals in whole racks. The weekly total is the sum of each day's rounded whole-rack prep; it assumes no carryover. Adjust prep for usable inventory and confirmed events.
+
+```powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
+```
+
+For a chosen week or known closure, add `--week-start 2026-11-02` and repeat `--closed-date YYYY-MM-DD` for each closed date. Week start must follow the input period and be within 90 days of its end. Closed dates must be between the next forecast date and the sheet's end; they receive zero demand and zero prep, with no buffer. Other dates are assumed open. Future closures are left unknown in lag features to match excluded historical closures. A later week start forecasts intervening days too, without showing them on the sheet. Do not use a future start to skip unavailable history silently: refresh sales first when possible.
+
+The selected model is refitted once using complete known sales. Later forecasts recursively use earlier **unbuffered demand predictions**, never prep quantities or unavailable actuals. Existing missing/partial historical dates stay unknown. The baseline keeps its historical weekday averages. One-day held-out metrics do not measure seven-day accuracy; the weekly plan is provisional, especially when the latest input day is partial. Refresh the sheet daily with completed sales. The buffer remains a business assumption rather than an uncertainty interval.
+
+
+## Optional next-day weather adjustment
+
+The daily export's `temp_max_f`, `temp_min_f`, `precip_in`, and `snowfall_in` can train an optional weather adjustment. Inputs use **Fahrenheit and inches**; precipitation means expected amount, not percentage chance of rain. Use forecast conditions available before prep, not today's conditions as a substitute for tomorrow's forecast. There is no automatic weather lookup or external service.
+
+For example, the following **hypothetical** conditions illustrate the CLI (replace with the actual next-day forecast):
+
+```powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --weather-high 45 --weather-low 32 --weather-rain 0.30 --weather-snow 0 --weather-bias auto
+```
+
+`auto` is the default. A regularized Poisson model learns weather associations while controlling for calendar and prior sales. For a given day, its expected demand at supplied conditions is divided by its expected demand at reference weather, holding other features fixed. Reference weather is the historical median of each field. This multiplier adjusts the selected core model's forecast before the safety buffer, bounded between **0.75 and 1.25**. This cap is a conservative business assumption, not a calibrated interval or a learned threshold. Weather associations are not causal effects.
+
+The chronological comparison fits on training dates only and uses training-only reference medians. Adjustment turns on automatically only with at least 60 complete training-weather days, 14 complete test-weather days, 80% test coverage and at least 5% holdout MAE improvement. Test days without all four observed fields retain the base forecast. This gate is exploratory: historic observations are what happened, not archived forecasts available the day before. Forecast errors can reduce real operational performance. After comparison, the weather model and reference medians are refitted using all known historical target dates.
+
+On the current 350-day prepared sample, core Poisson MAE is **10.19 quarters (2.55 racks)** versus **11.71 quarters (2.93 racks)** after weather adjustment. This worsens error by roughly 15%, so **auto leaves weather adjustment off**. `--weather-bias off` disables it explicitly. `--weather-bias on` is an explicit exploratory override that applies the learned multiplier despite this result; it still requires sufficient historical data. An override should not be treated as evidence of improvement.
+
+For several days, create a local CSV and pass `--weather-forecast data/weather_forecast.csv`:
+
+```csv
+date,temp_max_f,temp_min_f,precip_in,snowfall_in
+```
+
+Add dated rows using the weather forecast available at the time you plan prep. Dates must be unique and within the upcoming forecast period. CLI weather flags set or override the next-day row. A blank field is unknown and uses reference weather for that field; an entirely blank or absent day causes no adjustment. An explicit zero means dry/no snow, not missing. Temperature highs must be at least their corresponding lows. Negative precipitation, invalid numbers, duplicate dates and out-of-period forecasts are rejected. No historical missing weather is automatically treated as zero.
+
+`outputs/weather_forecast_template.csv` provides seven blank dated rows for the current input period. Copy it into `data/`, fill in real forecast values, and use that file. Tomorrow's recommendation and the weekly sheet use the same adjustment logic. Later weekly forecasts use earlier adjusted demand in their lags; the buffer is never fed back as demand. Closed dates always receive zero demand/prep regardless of weather.
+
+Audit files:
+
+- `weather_report.json`: comparison, gate decision, reference weather and limitations.
+- `weather_comparison.csv` and `weather_test_predictions.csv`: experimental historic results (when history is sufficient).
+- `weather_coefficients.csv`: standardized numeric coefficients, not raw-unit effects.
+- `weather_inputs.csv`: the supplied future weather, saved for review.
+- `prep_recommendation.json`: base demand, multiplier, supplied conditions and adjusted prep.
+- `weekly_prep_sheet.csv`: daily base demand, multiplier, conditions and adjusted forecast; the PDF annotates applied changes in Notes.
+
+No supplied future weather means no adjustment, even when enabled. Update complete sales and weather forecasts daily. The same stockout, incomplete-sales and unverified-event limitations still apply.
