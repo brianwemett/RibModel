@@ -35,7 +35,7 @@ The forecast and the prep decision are deliberately separated. The model predict
 
 The workflow is:
 
-\`\`\`text
+```text
 historical sales
       ↓
 daily demand table
@@ -59,7 +59,7 @@ next-day forecast
 operational prep buffer
       ↓
 daily / weekly kitchen prep recommendation
-\`\`\`
+```
 
 ### Features
 
@@ -99,7 +99,7 @@ It provides a simple operational benchmark: a more complex model should only be 
 
 #### Poisson regression
 
-The Poisson model uses \`sklearn.linear_model.PoissonRegressor\` with:
+The Poisson model uses `sklearn.linear_model.PoissonRegressor` with:
 
 - one-hot encoded weekday and month
 - scaled numeric features
@@ -112,7 +112,7 @@ The strict Poisson equal-mean/variance assumption may not hold perfectly in rest
 
 #### Histogram gradient boosting
 
-\`HistGradientBoostingRegressor\` provides a more flexible comparison that can capture nonlinear relationships and feature interactions automatically.
+`HistGradientBoostingRegressor` provides a more flexible comparison that can capture nonlinear relationships and feature interactions automatically.
 
 In the current data, that extra flexibility did not improve holdout performance enough to justify preferring it over Poisson regression.
 
@@ -205,9 +205,9 @@ The holdout is used for model comparison and selection, so its reported score is
 
 **No restaurant transaction or sales export is included in this repository.**
 
-Raw restaurant data, generated operational reports, model outputs, local environments, and secrets remain outside version control through \`.gitignore\`.
+Raw restaurant data, generated operational reports, model outputs, local environments, and secrets remain outside version control through `.gitignore`.
 
-The code is designed to run against local data stored in \`data/\`, while generated files are written to \`outputs/\`. Both directories are ignored except for placeholder \`.gitkeep\` files.
+The code is designed to run against local data stored in `data/`, while generated files are written to `outputs/`. Both directories are ignored except for placeholder `.gitkeep` files.
 
 ## Tech Stack
 
@@ -219,7 +219,7 @@ The code is designed to run against local data stored in \`data/\`, while genera
 
 ## Project Structure
 
-\`\`\`text
+```text
 RibModel/
 ├── data/                  # local inputs; ignored by Git
 ├── outputs/               # generated reports; ignored by Git
@@ -233,7 +233,7 @@ RibModel/
 ├── README.md
 ├── requirements.txt
 └── requirements-lock.txt
-\`\`\`
+```
 
 ## Setup
 
@@ -241,59 +241,59 @@ Create a local Python virtual environment.
 
 ### Windows PowerShell
 
-\`\`\`powershell
+```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-\`\`\`
+```
 
 ### Windows Command Prompt
 
-\`\`\`cmd
+```cmd
 python -m venv .venv
 .venv\Scripts\activate.bat
 python -m pip install -r requirements.txt
-\`\`\`
+```
 
 ### macOS / Linux
 
-\`\`\`bash
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-\`\`\`
+```
 
-Use \`deactivate\` to exit the environment. In VS Code, select \`.venv\` as the Python interpreter.
+Use `deactivate` to exit the environment. In VS Code, select `.venv` as the Python interpreter.
 
 For exact verified dependency versions:
 
-\`\`\`bash
+```bash
 python -m pip install -r requirements-lock.txt
-\`\`\`
+```
 
 ## Data and Usage
 
 ### Generic transaction export
 
-Put a local export in \`data/sales.csv\`.
+Put a local export in `data/sales.csv`.
 
 Inspect an unfamiliar export first:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/sales.csv --inspect
-\`\`\`
+```
 
 Run the forecast:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/sales.csv
-\`\`\`
+```
 
 Explicit mappings can be supplied when column names differ:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/sales.csv --date-column "Transaction Date" --item-column "Menu Item" --quantity-column "Qty" --rib-keyword "rib" --prep-buffer 15 --buffer-type percent
-\`\`\`
+```
 
 Mappings are inferred for common date/item/quantity names, while explicit arguments take priority.
 
@@ -303,11 +303,11 @@ Quantities must be finite and nonnegative. Refunds should be resolved before mod
 
 The current operational workflow can consume a normalized daily file:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
-\`\`\`
+```
 
-Daily format is detected by \`total_quarter_racks\`; use \`--input-format daily\` to specify it explicitly.
+Daily format is detected by `total_quarter_racks`; use `--input-format daily` to specify it explicitly.
 
 For the prepared daily workflow:
 
@@ -329,30 +329,30 @@ Dates entirely absent from an export remain unknown by default and are excluded 
 
 Use:
 
-\`\`\`text
+```text
 --missing-days zero
-\`\`\`
+```
 
 only after confirming that missing dates truly represent zero sales.
 
-Optional \`--stockout-column SoldOut\` accepts true/false, yes/no, or 1/0 values and adds stockout flags to diagnostics. The software does not fabricate demand beyond observed sales.
+Optional `--stockout-column SoldOut` accepts true/false, yes/no, or 1/0 values and adds stockout flags to diagnostics. The software does not fabricate demand beyond observed sales.
 
 ## Outputs
 
-The \`outputs/\` directory can contain:
+The `outputs/` directory can contain:
 
-- \`daily_rib_sales.csv\`
-- \`model_comparison.csv\`
+- `daily_rib_sales.csv`
+- `model_comparison.csv`
 - held-out predictions
 - per-model worst-day tables
 - sales-over-time plot
 - weekday/month/distribution plots
 - actual-vs-predicted plot
 - model-selection notes
-- \`prep_recommendation.json\`
-- \`weekly_prep_sheet.csv\`
-- \`weekly_prep_sheet.pdf\`
-- \`weekly_prep_sheet.png\`
+- `prep_recommendation.json`
+- `weekly_prep_sheet.csv`
+- `weekly_prep_sheet.pdf`
+- `weekly_prep_sheet.png`
 - weather experiment diagnostics
 
 Generated outputs remain ignored by Git.
@@ -361,15 +361,15 @@ Generated outputs remain ignored by Git.
 
 A normal forecast run also creates a seven-day prep sheet:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
-\`\`\`
+```
 
 For a chosen week or known closure:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --week-start 2026-11-02 --closed-date 2026-11-05
-\`\`\`
+```
 
 Closed dates receive zero predicted demand and zero prep.
 
@@ -379,38 +379,38 @@ Refresh the sheet with completed sales whenever possible rather than treating a 
 
 The optional weather workflow accepts:
 
-- \`temp_max_f\`
-- \`temp_min_f\`
-- \`precip_in\`
-- \`snowfall_in\`
+- `temp_max_f`
+- `temp_min_f`
+- `precip_in`
+- `snowfall_in`
 
 Example:
 
-\`\`\`powershell
+```powershell
 python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --weather-high 45 --weather-low 32 --weather-rain 0.30 --weather-snow 0 --weather-bias auto
-\`\`\`
+```
 
 The application does not perform an automatic weather lookup. Supply forecast conditions that would actually have been available before prep.
 
 The adjustment is bounded between 0.75 and 1.25 as a conservative business rule, not a learned confidence interval.
 
-Because the current historical weather experiment worsened holdout performance, \`auto\` leaves weather adjustment disabled.
+Because the current historical weather experiment worsened holdout performance, `auto` leaves weather adjustment disabled.
 
 For several future days, provide a local CSV:
 
-\`\`\`csv
+```csv
 date,temp_max_f,temp_min_f,precip_in,snowfall_in
-\`\`\`
+```
 
-and run with \`--weather-forecast data/weather_forecast.csv\`.
+and run with `--weather-forecast data/weather_forecast.csv`.
 
 ## Verification
 
 Run the test suite with:
 
-\`\`\`powershell
+```powershell
 python -m unittest discover -s tests -v
-\`\`\`
+```
 
 Tests use synthetic sales and verify items including:
 
