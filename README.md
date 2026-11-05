@@ -1,146 +1,442 @@
-# RibModel
+# Restaurant Rib Demand Forecasting & Prep Optimization
 
-A small Python project that forecasts next-day restaurant rib sales, compares a weekday baseline, Poisson regression and histogram gradient boosting, and recommends a preparation quantity.
+An end-to-end machine-learning project that forecasts next-day restaurant rib demand and translates the forecast into a practical kitchen prep recommendation.
 
-## Setup (Python 3.11+)
+The project uses historical sales patterns, calendar information, lagged demand, and rolling demand features to compare a simple weekday baseline, regularized Poisson regression, and histogram gradient boosting. Model evaluation uses a chronological holdout so the test period represents future dates rather than a random sample of the past.
 
-From this folder in Windows PowerShell:
+**Current status: operational pilot.** Forecasts are being provided to restaurant staff through a weekly prep sheet, with actual prep, sales, leftovers, and operational notes available for follow-up evaluation.
 
-```powershell
+## Results
+
+On the current prepared dataset of 350 usable daily observations, the models produced the following chronological holdout results:
+
+| Model | MAE (full racks) | RMSE (full racks) |
+| --- | ---: | ---: |
+| Weekday baseline | 2.83 | 3.38 |
+| **Poisson regression** | **2.55** | **3.06** |
+| Gradient boosting | 2.78 | 3.43 |
+
+Poisson regression reduced holdout MAE by approximately **10%** versus the simple weekday baseline while also outperforming the more flexible gradient-boosting model.
+
+The result is intentionally treated as a model-selection result rather than a final estimate of future production performance. The same holdout helped choose the model, so additional chronological validation windows are needed to establish stability.
+
+## Business Problem
+
+Restaurant rib preparation has a direct operational tradeoff:
+
+- **Over-preparation** creates food waste and unnecessary food cost.
+- **Under-preparation** creates stockouts, lost sales, and a poorer guest experience.
+
+The modeling goal is to estimate expected rib demand before service and convert that forecast into a useful prep recommendation.
+
+The forecast and the prep decision are deliberately separated. The model predicts expected demand; an operational safety buffer is applied afterward. That buffer is a business rule, not a model confidence interval, and should ultimately be calibrated against the relative cost of waste and stockouts.
+
+## Modeling Approach
+
+The workflow is:
+
+\`\`\`text
+historical sales
+      ↓
+daily demand table
+      ↓
+calendar + lagged demand features
+      ↓
+chronological train/test split
+      ↓
+weekday baseline
+      ↓
+Poisson regression
+      ↓
+histogram gradient boosting
+      ↓
+MAE / RMSE comparison
+      ↓
+selected model
+      ↓
+next-day forecast
+      ↓
+operational prep buffer
+      ↓
+daily / weekly kitchen prep recommendation
+\`\`\`
+
+### Features
+
+Calendar features:
+
+- weekday
+- month
+- day of month
+- ISO week
+- weekend indicator
+
+Historical demand features:
+
+- previous-day sales
+- previous-week sales
+- trailing 7-day mean
+- trailing 28-day mean
+- previous four same weekdays
+
+All lagged and rolling features are shifted before calculation so they use **past data only**. Preprocessing is fit on training dates only.
+
+### Validation
+
+The default evaluation uses the first 80% of known dates for training and the final 20% for testing.
+
+This is a **chronological holdout**, not a random split. It better represents the real task: predicting future restaurant demand from information available in the past.
+
+Evaluation simulates **one-day-ahead forecasting**. Each test day's observed sales are available before forecasting the following day. The fitted models remain fixed during the holdout evaluation.
+
+### Models
+
+#### Weekday baseline
+
+The baseline predicts demand using the average historical sales for the same weekday from the training period.
+
+It provides a simple operational benchmark: a more complex model should only be preferred if it meaningfully improves on a rule that is easy to understand and maintain.
+
+#### Poisson regression
+
+The Poisson model uses \`sklearn.linear_model.PoissonRegressor\` with:
+
+- one-hot encoded weekday and month
+- scaled numeric features
+- median imputation for missing historical inputs
+- regularization
+
+Poisson regression is a useful comparison because daily demand is nonnegative and count-like, while the model remains relatively interpretable.
+
+The strict Poisson equal-mean/variance assumption may not hold perfectly in restaurant demand, so performance is judged empirically on the chronological holdout rather than assumed from the model family.
+
+#### Histogram gradient boosting
+
+\`HistGradientBoostingRegressor\` provides a more flexible comparison that can capture nonlinear relationships and feature interactions automatically.
+
+In the current data, that extra flexibility did not improve holdout performance enough to justify preferring it over Poisson regression.
+
+## Model Selection
+
+Automatic selection starts with the weekday baseline and only accepts a more complex candidate when it reduces current MAE by at least 5%.
+
+That threshold is a transparent heuristic rather than proof that one model is universally superior. Final selection should also consider:
+
+- MAE and RMSE
+- worst prediction days
+- interpretability
+- stability
+- complexity
+- maintenance cost
+- operational usefulness
+
+The selected model can also be overridden explicitly from the command line.
+
+## Key Findings
+
+- Recent demand history plus broader calendar information improved on a weekday-only baseline.
+- Poisson regression generalized better than the gradient-boosting model on the current holdout.
+- Model complexity did not automatically produce better performance.
+- Large misses are operationally useful diagnostic cases rather than just metric penalties.
+- Observed sales may underestimate true demand on stockout days.
+- The operational prep buffer should be tuned separately from the demand model.
+- Weather appeared intuitively useful but did **not** improve holdout performance in the current sample.
+
+## Weather Experiment
+
+Historical high temperature, low temperature, precipitation, and snowfall can be evaluated as an optional Poisson-based adjustment.
+
+The weather model compares expected demand at supplied conditions with expected demand at historical median weather while controlling for calendar and prior-sales features.
+
+On the current prepared sample:
+
+- core Poisson MAE: **2.55 full racks**
+- weather-adjusted MAE: **2.93 full racks**
+
+Because weather worsened holdout MAE by roughly 15%, automatic weather adjustment remains **off**.
+
+This is an important design choice: plausible features are not retained simply because they sound useful. They must demonstrate out-of-sample value.
+
+## Operational Pilot
+
+The project generates a printable weekly prep sheet for restaurant staff.
+
+The sheet includes:
+
+- forecast demand
+- buffered prep recommendation
+- weekly prep total
+- blanks for actual prep
+- sold quantity
+- leftovers
+- operational notes
+
+The pilot is intended to create a feedback loop between model performance and restaurant operations. Future evaluation can compare forecast error with the business outcomes that matter most: waste, stockouts, and lost sales.
+
+Weekly forecasts are recursive. Later days use earlier **unbuffered demand predictions** as lag inputs when actual future sales are not yet available. Because of that, one-day holdout metrics should not be interpreted as seven-day forecast accuracy.
+
+## Important Limitations
+
+### Observed sales vs. true demand
+
+No stockout history was supplied for the current dataset. If the restaurant sells out, recorded sales can be lower than actual customer demand.
+
+The model therefore estimates **observed sales**, not fully uncensored demand.
+
+### Incomplete seasonal history
+
+The current prepared sample spans less than a complete multi-year seasonal history. Additional data should improve evaluation of year-over-year seasonality and unusual calendar periods.
+
+### Closures and partial days
+
+Partial days are excluded from model targets and historical quantities.
+
+Daily rows with zero checks are treated as probable closures by default and excluded from targets/history. This is an operational inference and should be confirmed rather than blindly assumed.
+
+### Events and promotions
+
+Known future holidays, promotions, local events, and menu changes are not included in the core model in this version.
+
+### Holdout reuse
+
+The holdout is used for model comparison and selection, so its reported score is not a fully independent post-selection performance estimate. Rolling or multiple chronological validation windows are a natural next step.
+
+## Data Privacy
+
+**No restaurant transaction or sales export is included in this repository.**
+
+Raw restaurant data, generated operational reports, model outputs, local environments, and secrets remain outside version control through \`.gitignore\`.
+
+The code is designed to run against local data stored in \`data/\`, while generated files are written to \`outputs/\`. Both directories are ignored except for placeholder \`.gitkeep\` files.
+
+## Tech Stack
+
+- Python 3.11+
+- pandas
+- NumPy
+- scikit-learn
+- matplotlib
+
+## Project Structure
+
+\`\`\`text
+RibModel/
+├── data/                  # local inputs; ignored by Git
+├── outputs/               # generated reports; ignored by Git
+├── src/
+│   ├── rib_forecast.py
+│   └── weather_bias.py
+├── tests/
+│   ├── test_forecast.py
+│   └── test_weather.py
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── requirements-lock.txt
+\`\`\`
+
+## Setup
+
+Create a local Python virtual environment.
+
+### Windows PowerShell
+
+\`\`\`powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-```
+\`\`\`
 
-Command Prompt activation: `.venv\Scripts\activate.bat`.
-macOS/Linux: `python3 -m venv .venv`, then `source .venv/bin/activate`.
-Use `deactivate` to exit. In VS Code select `.venv` as the Python interpreter.
+### Windows Command Prompt
 
-## Data and usage
+\`\`\`cmd
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+\`\`\`
 
-Put your export in `data/sales.csv`. Raw restaurant data and generated outputs are ignored by Git.
+### macOS / Linux
+
+\`\`\`bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+\`\`\`
+
+Use \`deactivate\` to exit the environment. In VS Code, select \`.venv\` as the Python interpreter.
+
+For exact verified dependency versions:
+
+\`\`\`bash
+python -m pip install -r requirements-lock.txt
+\`\`\`
+
+## Data and Usage
+
+### Generic transaction export
+
+Put a local export in \`data/sales.csv\`.
+
 Inspect an unfamiliar export first:
 
-```powershell
+\`\`\`powershell
 python src/rib_forecast.py --input data/sales.csv --inspect
+\`\`\`
+
+Run the forecast:
+
+\`\`\`powershell
 python src/rib_forecast.py --input data/sales.csv
+\`\`\`
+
+Explicit mappings can be supplied when column names differ:
+
+\`\`\`powershell
 python src/rib_forecast.py --input data/sales.csv --date-column "Transaction Date" --item-column "Menu Item" --quantity-column "Qty" --rib-keyword "rib" --prep-buffer 15 --buffer-type percent
-```
+\`\`\`
 
-Mappings are inferred for common date/item/quantity names; explicit arguments take priority. Keywords are literal case-insensitive substrings; repeated `--rib-keyword` arguments replace defaults. Review matching item names, especially combo meals. Quantities must be finite and nonnegative. Resolve refunds before running. Parse timestamps in the restaurant's local timezone with consistent formatting; ambiguous date formats should be normalized upstream. All quantities must use the same unit: convert half/full racks to equivalent units upstream. The tool never assumes quantities mean individual ribs or racks.
+Mappings are inferred for common date/item/quantity names, while explicit arguments take priority.
 
-At least 35 observed days are required; several months covering all weekdays are better. Days containing other restaurant transactions but no matching rib items are observed zero sales. Dates entirely absent from the export remain unknown by default and are excluded as training/evaluation targets. Use `--missing-days zero` only after confirming they are true zero-sale days. Missing historical inputs are imputed using training medians for Poisson; boosting handles missing inputs directly. Optional `--stockout-column SoldOut` accepts true/false, yes/no or 1/0 and adds flags to diagnostics. No fabricated demand correction is applied. Sales on stockout days underestimate true demand; absent flags are an explicit limitation. An export containing only rib lines cannot distinguish zero rib sales from missing dates.
+Quantities must be finite and nonnegative. Refunds should be resolved before modeling. Timestamps should use consistent local-date formatting, and all rib quantities must be converted to a consistent unit before fitting.
 
-## Features and evaluation
+### Prepared daily export
 
-Calendar features: weekday, month, day of month, ISO week, weekend. Historical features: previous day, previous week, trailing 7/28-day mean, previous four same weekdays. Every historical feature shifts before rolling; preprocessing is fitted only on training dates.
+The current operational workflow can consume a normalized daily file:
 
-The first 80% of known dates train the models; the last 20% evaluate them (`--test-fraction` changes this). Evaluation simulates **one-day-ahead predictions**: each day's observed sales are available before forecasting the following day. This is not a fixed-origin multi-day forecast. Models remain fixed during evaluation. The weekday baseline uses training-only averages. MAE is the average absolute error in source units; RMSE penalizes large misses more heavily.
+\`\`\`powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
+\`\`\`
 
-Poisson regression uses regularization and a log link, with encoded weekday/month and scaled numeric inputs. Count-like nonnegative demand makes it a useful interpretable comparison, but the Poisson equal-mean/variance assumption is often imperfect. Boosting captures nonlinear effects and interactions with a small fixed configuration; there is no hyperparameter search.
+Daily format is detected by \`total_quarter_racks\`; use \`--input-format daily\` to specify it explicitly.
 
-The automatic choice starts with the baseline, then accepts Poisson and boosting only when each reduces current MAE by at least 5%. This is a transparent heuristic, not proof of superiority. Review RMSE, worst days, complexity and maintenance before choosing. Use `--model weekday_baseline`, `--model poisson_regression` or `--model gradient_boosting` to override. The holdout helps choose a model, so its reported score is not an independent estimate after model selection. Additional chronological validation windows are needed to establish stability.
+For the prepared daily workflow:
 
-## Outputs and prep
+- target units are quarter racks
+- full rack = 4 quarters
+- half rack = 2 quarters
+- combo/modifier conversions are already included in prepared totals
+- the item mapping audits conversion arithmetic and reconciles totals
 
-`outputs/` contains daily sales, the MAE/RMSE comparison, held-out predictions, per-model worst-day tables (with weekday and optional stockout flags), sales-over-time/weekday/month/distribution plots, actual-versus-predicted plot, model-selection notes and `prep_recommendation.json`.
+The example command uses a fixed 12-quarter / 3-full-rack operational buffer. That number is configurable and is not a learned model parameter.
 
-The selected model is refitted on all observed dates for the next calendar day. Fixed buffer (default 3): `ceil(prediction + buffer)`. Percentage buffer: `ceil(prediction * (1 + buffer / 100))`. The recommendation retains the input quantity units. Tune the buffer against waste, stockout and lost-sales costs; it is not a calibrated uncertainty interval. Confirm the restaurant is open on the recommended day. Holidays, promotions, changing menus, weather and future events are not modeled in this first version.
+## Missing and Zero Days
 
-## ML Concepts Practiced
+At least 35 observed days are required, though several months covering all weekdays are preferable.
 
-- Feature engineering and lagged calendar-day history.
-- Time-based validation and avoiding future-data leakage.
-- Baselines before complexity.
-- Poisson regression / GLMs and their assumptions.
-- Gradient boosting for nonlinear relationships.
-- MAE versus RMSE.
-- Model complexity versus interpretability and stability.
-- Business tradeoffs: waste, censored demand, lost sales and operational prep.
+Days containing other restaurant transactions but no matching rib items are observed zero-sales days.
+
+Dates entirely absent from an export remain unknown by default and are excluded from training/evaluation targets.
+
+Use:
+
+\`\`\`text
+--missing-days zero
+\`\`\`
+
+only after confirming that missing dates truly represent zero sales.
+
+Optional \`--stockout-column SoldOut\` accepts true/false, yes/no, or 1/0 values and adds stockout flags to diagnostics. The software does not fabricate demand beyond observed sales.
+
+## Outputs
+
+The \`outputs/\` directory can contain:
+
+- \`daily_rib_sales.csv\`
+- \`model_comparison.csv\`
+- held-out predictions
+- per-model worst-day tables
+- sales-over-time plot
+- weekday/month/distribution plots
+- actual-vs-predicted plot
+- model-selection notes
+- \`prep_recommendation.json\`
+- \`weekly_prep_sheet.csv\`
+- \`weekly_prep_sheet.pdf\`
+- \`weekly_prep_sheet.png\`
+- weather experiment diagnostics
+
+Generated outputs remain ignored by Git.
+
+## Weekly Prep Sheet
+
+A normal forecast run also creates a seven-day prep sheet:
+
+\`\`\`powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
+\`\`\`
+
+For a chosen week or known closure:
+
+\`\`\`powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --week-start 2026-11-02 --closed-date 2026-11-05
+\`\`\`
+
+Closed dates receive zero predicted demand and zero prep.
+
+Refresh the sheet with completed sales whenever possible rather than treating a seven-day forecast as fixed.
+
+## Optional Weather Scenario
+
+The optional weather workflow accepts:
+
+- \`temp_max_f\`
+- \`temp_min_f\`
+- \`precip_in\`
+- \`snowfall_in\`
+
+Example:
+
+\`\`\`powershell
+python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --weather-high 45 --weather-low 32 --weather-rain 0.30 --weather-snow 0 --weather-bias auto
+\`\`\`
+
+The application does not perform an automatic weather lookup. Supply forecast conditions that would actually have been available before prep.
+
+The adjustment is bounded between 0.75 and 1.25 as a conservative business rule, not a learned confidence interval.
+
+Because the current historical weather experiment worsened holdout performance, \`auto\` leaves weather adjustment disabled.
+
+For several future days, provide a local CSV:
+
+\`\`\`csv
+date,temp_max_f,temp_min_f,precip_in,snowfall_in
+\`\`\`
+
+and run with \`--weather-forecast data/weather_forecast.csv\`.
 
 ## Verification
 
-```powershell
+Run the test suite with:
+
+\`\`\`powershell
 python -m unittest discover -s tests -v
-```
+\`\`\`
 
-Tests use synthetic sales and verify past-only features, missing-day handling and end-to-end output generation; their scores do not represent restaurant performance.
+Tests use synthetic sales and verify items including:
 
-## GitHub
+- past-only historical features
+- missing-day handling
+- partial/closed-day behavior
+- daily mapping reconciliation
+- recursive weekly forecasts
+- weekly prep generation
+- weather validation
+- end-to-end output generation
 
-Intended repository: https://github.com/brianwemett/RibModel
-Do not commit restaurant exports, local environments, secrets or generated reports. Authentication is handled by your Git credential manager or SSH configuration.
+Synthetic test scores do not represent restaurant performance.
 
-For the exact verified dependency versions, install with: `python -m pip install -r requirements-lock.txt`.
+## Next Steps
 
+Likely future improvements include:
 
-## Prepared daily exports (Good Smoke BBQ)
+- rolling chronological validation
+- explicit stockout / sellout-time capture
+- calibration of the prep buffer against waste and stockout costs
+- additional full seasonal cycles
+- verified promotions and local-event features
+- daily operational error tracking
+- comparison of forecast accuracy with actual waste and lost-sales outcomes
 
-The uploaded `data/rib_sales_daily.csv` is already normalized by business date and rack portion. Run from the project root:
+## License
 
-```powershell
-python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
-```
-
-Daily format is detected by `total_quarter_racks`; use `--input-format daily` to specify it explicitly. The target is **quarter racks**, not menu item counts. Full rack = 4 quarters; half rack = 2. Do not multiply combo/modifier counts again: the prepared totals already contain those conversions. The mapping is used to audit conversion arithmetic and reconcile its full-period total against daily totals, not to recount sales. It must cover the same export period. Daily component totals and `total_racks_equiv` are checked when present. Raw transaction mode remains supported (`--input-format transactions`).
-
-The command above uses a fixed 12-quarter buffer (3 full racks). JSON output includes expected quarter racks, rack equivalents and the number of whole racks needed after buffering. The generic CLI default remains 3 input units, so explicitly set your chosen buffer. Use `--buffer-type percent --prep-buffer 15` for a 15% buffer.
-
-`partial=1` days are retained in the calendar audit but excluded from targets and historical quantities. A partial last day still determines the next calendar date; its incomplete total never becomes a next-day lag. The recommendation reports the latest complete observation and number of missing recent sales days, and is provisional when recent data is incomplete.
-
-By default, daily rows with zero checks are treated as probable closures and excluded from targets/history; `--closed-days keep` retains them as zeros for calendar-day sales forecasting. This inference needs operational confirmation. One-check/near-zero days remain included, including Easter; do not infer closure from low demand alone. Predictions under the default policy describe an assumed open service day. Check the opening schedule before prep.
-
-`outputs/data_quality.json` lists units, usable days, excluded dates and reconciled totals. `daily_rib_sales.csv` retains reported quantities and exclusion reasons. Worst-day tables include check counts, holiday names and event labels for retrospective investigation only; event labels may be unverified. Contextual columns, same-day net sales and manually supplied holiday fields are not core-model predictors. Weather can enter the optional scenario adjustment described below. No online event verification is performed.
-
-The November 2025-October 2026 upload has less than a complete annual cycle. Rib Teaser portion sizes and ad-hoc item assumptions remain as documented in the data README. No stockout history was supplied, so the forecast estimates observed sales rather than uncensored demand. The data README references upstream build/weather files that are not present in this folder; this project consumes the prepared CSVs directly. All uploaded data and generated results remain excluded from Git.
-
-
-## Weekly prep sheet
-
-Each forecast run also creates `outputs/weekly_prep_sheet.pdf` (one printable landscape letter page), `weekly_prep_sheet.csv` (editable daily figures), and a PNG preview. By default the sheet covers the next seven calendar days after the latest input date. It shows forecast volume, daily buffered prep, a weekly total, and blanks for actual prep, sold, leftovers and notes. For quarter-rack inputs, the kitchen sheet shows demand in full-rack equivalents and prep/actuals in whole racks. The weekly total is the sum of each day's rounded whole-rack prep; it assumes no carryover. Adjust prep for usable inventory and confirmed events.
-
-```powershell
-python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12
-```
-
-For a chosen week or known closure, add `--week-start 2026-11-02` and repeat `--closed-date YYYY-MM-DD` for each closed date. Week start must follow the input period and be within 90 days of its end. Closed dates must be between the next forecast date and the sheet's end; they receive zero demand and zero prep, with no buffer. Other dates are assumed open. Future closures are left unknown in lag features to match excluded historical closures. A later week start forecasts intervening days too, without showing them on the sheet. Do not use a future start to skip unavailable history silently: refresh sales first when possible.
-
-The selected model is refitted once using complete known sales. Later forecasts recursively use earlier **unbuffered demand predictions**, never prep quantities or unavailable actuals. Existing missing/partial historical dates stay unknown. The baseline keeps its historical weekday averages. One-day held-out metrics do not measure seven-day accuracy; the weekly plan is provisional, especially when the latest input day is partial. Refresh the sheet daily with completed sales. The buffer remains a business assumption rather than an uncertainty interval.
-
-
-## Optional next-day weather adjustment
-
-The daily export's `temp_max_f`, `temp_min_f`, `precip_in`, and `snowfall_in` can train an optional weather adjustment. Inputs use **Fahrenheit and inches**; precipitation means expected amount, not percentage chance of rain. Use forecast conditions available before prep, not today's conditions as a substitute for tomorrow's forecast. There is no automatic weather lookup or external service.
-
-For example, the following **hypothetical** conditions illustrate the CLI (replace with the actual next-day forecast):
-
-```powershell
-python src/rib_forecast.py --input data/rib_sales_daily.csv --item-mapping data/item_mapping.csv --prep-buffer 12 --weather-high 45 --weather-low 32 --weather-rain 0.30 --weather-snow 0 --weather-bias auto
-```
-
-`auto` is the default. A regularized Poisson model learns weather associations while controlling for calendar and prior sales. For a given day, its expected demand at supplied conditions is divided by its expected demand at reference weather, holding other features fixed. Reference weather is the historical median of each field. This multiplier adjusts the selected core model's forecast before the safety buffer, bounded between **0.75 and 1.25**. This cap is a conservative business assumption, not a calibrated interval or a learned threshold. Weather associations are not causal effects.
-
-The chronological comparison fits on training dates only and uses training-only reference medians. Adjustment turns on automatically only with at least 60 complete training-weather days, 14 complete test-weather days, 80% test coverage and at least 5% holdout MAE improvement. Test days without all four observed fields retain the base forecast. This gate is exploratory: historic observations are what happened, not archived forecasts available the day before. Forecast errors can reduce real operational performance. After comparison, the weather model and reference medians are refitted using all known historical target dates.
-
-On the current 350-day prepared sample, core Poisson MAE is **10.19 quarters (2.55 racks)** versus **11.71 quarters (2.93 racks)** after weather adjustment. This worsens error by roughly 15%, so **auto leaves weather adjustment off**. `--weather-bias off` disables it explicitly. `--weather-bias on` is an explicit exploratory override that applies the learned multiplier despite this result; it still requires sufficient historical data. An override should not be treated as evidence of improvement.
-
-For several days, create a local CSV and pass `--weather-forecast data/weather_forecast.csv`:
-
-```csv
-date,temp_max_f,temp_min_f,precip_in,snowfall_in
-```
-
-Add dated rows using the weather forecast available at the time you plan prep. Dates must be unique and within the upcoming forecast period. CLI weather flags set or override the next-day row. A blank field is unknown and uses reference weather for that field; an entirely blank or absent day causes no adjustment. An explicit zero means dry/no snow, not missing. Temperature highs must be at least their corresponding lows. Negative precipitation, invalid numbers, duplicate dates and out-of-period forecasts are rejected. No historical missing weather is automatically treated as zero.
-
-`outputs/weather_forecast_template.csv` provides seven blank dated rows for the current input period. Copy it into `data/`, fill in real forecast values, and use that file. Tomorrow's recommendation and the weekly sheet use the same adjustment logic. Later weekly forecasts use earlier adjusted demand in their lags; the buffer is never fed back as demand. Closed dates always receive zero demand/prep regardless of weather.
-
-Audit files:
-
-- `weather_report.json`: comparison, gate decision, reference weather and limitations.
-- `weather_comparison.csv` and `weather_test_predictions.csv`: experimental historic results (when history is sufficient).
-- `weather_coefficients.csv`: standardized numeric coefficients, not raw-unit effects.
-- `weather_inputs.csv`: the supplied future weather, saved for review.
-- `prep_recommendation.json`: base demand, multiplier, supplied conditions and adjusted prep.
-- `weekly_prep_sheet.csv`: daily base demand, multiplier, conditions and adjusted forecast; the PDF annotates applied changes in Notes.
-
-No supplied future weather means no adjustment, even when enabled. Update complete sales and weather forecasts daily. The same stockout, incomplete-sales and unverified-event limitations still apply.
+No license has been specified. All rights remain with the repository owner.
